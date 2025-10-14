@@ -153,6 +153,8 @@ async def listen_for_triggers_task(client: MoonrakerClient, probe_handler: DataH
             line = update["params"][0]
             if "Mesh Bed Leveling Complete" in line:
                 logging.info(f"🔴 TRIGGER DETECTED: {line.strip()}")
+                logging.info("... Waiting 30 seconds for mesh data to stabilize ...")
+                await asyncio.sleep(30)
                 logging.info("--- Starting Full Data Refresh ---")
                 await sync_probe_data(client, probe_handler)
                 await sync_mesh_data(client, mesh_handler)
