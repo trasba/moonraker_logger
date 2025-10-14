@@ -1,0 +1,29 @@
+services:
+  moonraker_logger:
+    container_name: moonraker_logger
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    
+    # Pass the .env file to the container for configuration
+    env_file: ./.env
+
+    # <<< ADD THIS SECTION TO INJECT THE VARIABLE
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    # Mount the 'data' directory on the host to '/app/data' in the container
+    # This ensures your JSON files are persistent and accessible on your host machine.
+    volumes:
+      - ./data:/app/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      
+    # Configure logging to limit size and rotate files
+    # This prevents the log file from growing indefinitely.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Max size of 10 MB per file
+        max-file: "3"    # Keep up to 3 log files (1 active, 2 archived)

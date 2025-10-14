@@ -1,16 +1,14 @@
 [tool.poetry]
-name = "bed mesh"
+name = "moonraker-logger"
 version = "0.1.0"
 description = ""
 authors = ["trasba <t.rasbach@gmx.net>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
-numpy = "^2.3.3"
-scipy = "^1.16.2"
-matplotlib = "^3.10.7"
-websockets = "^15.0.1"
+python = "^3.10"
+websockets = "^12.0"
+python-dotenv = "^1.0.1"
 
 
 [build-system]
