@@ -3,39 +3,27 @@ import json
 import re
 from typing import List, Dict, Any
 import websockets
-from datetime import datetime
 import os
-import time # <<< NEW: Import the time module
+import time
 
 # ==============================================================================
-# DataHandler Class (unchanged)
+# DataHandler and MoonrakerClient Classes (unchanged)
 # ==============================================================================
 class DataHandler:
-    """Handles reading and writing data to a JSON file."""
     def __init__(self, filename: str):
         self.filename = filename
 
     def load_data(self) -> List[Dict]:
-        """Loads data from the JSON file."""
-        if not os.path.exists(self.filename):
-            return []
+        if not os.path.exists(self.filename): return []
         try:
-            with open(self.filename, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return []
+            with open(self.filename, 'r') as f: return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError): return []
 
     def save_data(self, data: List[Dict]):
-        """Saves data to the JSON file."""
-        with open(self.filename, 'w') as f:
-            json.dump(data, f, indent=2)
-        print(f"💾 Data successfully saved to {self.filename}")
+        with open(self.filename, 'w') as f: json.dump(data, f, indent=2)
+        print(f"💾 Data saved to {self.filename}")
 
-# ==============================================================================
-# MoonrakerClient Class (method for bed mesh is updated)
-# ==============================================================================
 class MoonrakerClient:
-    """A modular client for interacting with a Moonraker instance via WebSockets."""
     def __init__(self, host: str, port: int = 7125):
         self.uri = f"ws://{host}:{port}/websocket"
         self._websocket = None
@@ -45,9 +33,9 @@ class MoonrakerClient:
     async def connect(self):
         try:
             self._websocket = await websockets.connect(self.uri)
-            print("🔗 Successfully connected to Moonraker.")
+            print("🔗 Connected to Moonraker.")
         except Exception as e:
-            print(f"❌ Error connecting to Moonraker: {e}")
+            print(f"❌ Error connecting: {e}")
             self._websocket = None
             raise
 
@@ -55,21 +43,19 @@ class MoonrakerClient:
         if self._websocket:
             try:
                 await self._websocket.close()
-                print("🔌 Connection closed.")
+                print("\n🔌 Connection closed.")
             except websockets.exceptions.ConnectionClosed:
-                print("🔌 Connection was already closed.")
+                print("\n🔌 Connection was already closed.")
 
     async def _send_request(self, method: str, params: Dict = None) -> int:
-        if not self._websocket:
-            raise ConnectionError("Not connected. Call connect() first.")
+        if not self._websocket: raise ConnectionError("Not connected.")
         self._request_id += 1
         request = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": self._request_id}
         await self._websocket.send(json.dumps(request))
         return self._request_id
 
     async def _receive_response(self) -> Dict:
-        if not self._websocket:
-            raise ConnectionError("Not connected. Call connect() first.")
+        if not self._websocket: raise ConnectionError("Not connected.")
         return json.loads(await self._websocket.recv())
 
     async def get_probe_data(self) -> List[Dict]:
@@ -77,105 +63,113 @@ class MoonrakerClient:
         request_id = await self._send_request("server.gcode_store")
         while True:
             response = await self._receive_response()
-            if response.get("id") == request_id:
-                break
-        
-        probe_data = []
-        probe_pattern = re.compile(r"probe at ([\d\.]+),([\d\.]+) is z=([-\d\.]+)")
-        gcode_items = response.get("result", {}).get("gcode_store", [])
-        for item in gcode_items:
-            message = item.get("message", "")
-            match = probe_pattern.match(message)
+            if response.get("id") == request_id: break
+        probe_data, pattern = [], re.compile(r"probe at ([\d\.]+),([\d\.]+) is z=([-\d\.]+)")
+        for item in response.get("result", {}).get("gcode_store", []):
+            match = pattern.match(item.get("message", ""))
             if match:
                 x, y, z = map(float, match.groups())
-                timestamp = item.get("time")
-                probe_data.append({"x": x, "y": y, "z": z, "timestamp": timestamp})
-        print(f"🔬 Found {len(probe_data)} probe points in gcode_store.")
+                probe_data.append({"x": x, "y": y, "z": z, "timestamp": item.get("time")})
+        print(f"🔬 Found {len(probe_data)} total probe points in gcode_store.")
         return probe_data
 
     async def get_bed_mesh_data(self) -> Dict[str, Any] | None:
-        """Fetches the current bed mesh state from the printer."""
-        print("\nRequesting printer objects for bed mesh data...")
+        print("Requesting bed mesh data...")
         params = {"objects": {"bed_mesh": None}}
         request_id = await self._send_request("printer.objects.query", params)
-        
         while True:
             response = await self._receive_response()
-            if response.get("id") == request_id:
-                break
-        
-        status = response.get("result", {}).get("status", {})
-        bed_mesh = status.get("bed_mesh")
-        
-        # <<< CHANGED: Use the current epoch time instead of Moonraker's eventtime
-        timestamp = time.time()
-
-        if not bed_mesh or 'probed_matrix' not in bed_mesh:
-            print("❌ Bed mesh data not found in the response.")
-            return None
-        
-        print(f"🕸️ Found bed mesh '{bed_mesh.get('profile_name')}' from printer.")
-        
+            if response.get("id") == request_id: break
+        status, bed_mesh = response.get("result", {}).get("status", {}), None
+        if status: bed_mesh = status.get("bed_mesh")
+        if not bed_mesh or 'probed_matrix' not in bed_mesh: return None
+        print(f"🕸️ Found bed mesh '{bed_mesh.get('profile_name')}'.")
         return {
-            "timestamp": timestamp,
-            "profile_name": bed_mesh.get("profile_name"),
-            "mesh_min": bed_mesh.get("mesh_min"),
-            "mesh_max": bed_mesh.get("mesh_max"),
+            "timestamp": time.time(), "profile_name": bed_mesh.get("profile_name"),
+            "mesh_min": bed_mesh.get("mesh_min"), "mesh_max": bed_mesh.get("mesh_max"),
             "probed_matrix": bed_mesh.get("probed_matrix")
         }
 
 # ==============================================================================
-# Main Execution Logic (unchanged)
+# Helper Functions for Syncing Data
+# ==============================================================================
+async def sync_probe_data(client: MoonrakerClient, handler: DataHandler):
+    """Fetches the entire gcode_store and saves any new probe points."""
+    fetched_probes = await client.get_probe_data()
+    if not fetched_probes:
+        return
+
+    existing_data = handler.load_data()
+    existing_timestamps = {p['timestamp'] for p in existing_data}
+    
+    points_to_add = [p for p in fetched_probes if p['timestamp'] not in existing_timestamps]
+    
+    if points_to_add:
+        print(f"✨ Found {len(points_to_add)} new probe points to add.")
+        all_points = existing_data + points_to_add
+        all_points.sort(key=lambda p: p.get('timestamp', 0))
+        handler.save_data(all_points)
+    else:
+        print("👍 Probe data file is already up-to-date.")
+
+async def sync_mesh_data(client: MoonrakerClient, handler: DataHandler):
+    """Fetches the current bed mesh and saves it if it's unique."""
+    fetched_mesh = await client.get_bed_mesh_data()
+    if not fetched_mesh:
+        return
+
+    existing_meshes = handler.load_data()
+    is_new = not existing_meshes or existing_meshes[-1]['probed_matrix'] != fetched_mesh['probed_matrix']
+
+    if is_new:
+        print("✨ Bed mesh is new. Adding it to the file.")
+        updated_meshes = existing_meshes + [fetched_mesh]
+        updated_meshes.sort(key=lambda m: m.get('timestamp', 0))
+        handler.save_data(updated_meshes)
+    else:
+        print("👍 Bed mesh is identical to the last saved version.")
+
+# ==============================================================================
+# Main Execution Logic
 # ==============================================================================
 async def main():
-    """Main function to run the client, fetch all data, and save new entries."""
-    MOONRAKER_HOST = "192.168.176.236" 
-    
+    MOONRAKER_HOST = "192.168.176.236"
     probe_handler = DataHandler(filename="probe_data.json")
     mesh_handler = DataHandler(filename="bed_mesh_data.json")
-    
     client = MoonrakerClient(host=MOONRAKER_HOST)
 
     try:
         await client.connect()
 
-        # --- 1. Process Individual Probe Data ---
-        existing_probes = probe_handler.load_data()
-        existing_probe_timestamps = {point['timestamp'] for point in existing_probes}
-        newly_fetched_probes = await client.get_probe_data()
-        probes_to_add = [p for p in newly_fetched_probes if p.get('timestamp') not in existing_probe_timestamps]
-        
-        if probes_to_add:
-            print(f"✨ Found {len(probes_to_add)} new probe points to add.")
-            updated_probes = existing_probes + probes_to_add
-            updated_probes.sort(key=lambda p: p.get('timestamp', 0))
-            probe_handler.save_data(updated_probes)
-        else:
-            print("👍 Probe data file is already up-to-date.")
+        # --- 1. Perform an Initial Sync on Startup ---
+        print("--- Performing Initial Data Sync ---")
+        await sync_probe_data(client, probe_handler)
+        await sync_mesh_data(client, mesh_handler)
+        print("--- Initial Sync Complete ---")
 
-        # --- 2. Process Bed Mesh Data ---
-        existing_meshes = mesh_handler.load_data()
-        newly_fetched_mesh = await client.get_bed_mesh_data()
+        # --- 2. Listen Forever for the Trigger ---
+        print("\n📡 Now listening for 'Mesh Bed Leveling Complete' trigger...")
+        while True:
+            update = await client._receive_response()
+            
+            if update.get("method") == "notify_gcode_response":
+                line = update["params"][0]
+                
+                # We only care about the completion message now
+                if "Mesh Bed Leveling Complete" in line:
+                    print(f"\n🔴 TRIGGER DETECTED: {line.strip()}")
+                    print("--- Starting Full Data Refresh ---")
+                    await sync_probe_data(client, probe_handler)
+                    await sync_mesh_data(client, mesh_handler)
+                    print("--- Data Refresh Complete ---")
+                    print("\n📡 Resuming listening for trigger...")
 
-        if newly_fetched_mesh:
-            is_new_mesh = False
-            if not existing_meshes:
-                is_new_mesh = True
-            else:
-                last_saved_mesh = existing_meshes[-1]
-                if last_saved_mesh['probed_matrix'] != newly_fetched_mesh['probed_matrix']:
-                    is_new_mesh = True
-
-            if is_new_mesh:
-                print("✨ Bed mesh data is new and unique. Adding it to the file.")
-                updated_meshes = existing_meshes + [newly_fetched_mesh]
-                updated_meshes.sort(key=lambda m: m.get('timestamp', 0))
-                mesh_handler.save_data(updated_meshes)
-            else:
-                print("👍 Bed mesh data is identical to the last saved version. No changes made.")
-
+    except KeyboardInterrupt:
+        print("\n🛑 User interrupted. Shutting down.")
+    except websockets.exceptions.ConnectionClosedError:
+        print("\n⚠️ Connection to Moonraker lost. Exiting.")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"\nAn unexpected error occurred: {e}")
     finally:
         await client.close()
 
