@@ -5,12 +5,14 @@ A simple, automated service to collect and store bed mesh and probe data from a 
 ## Features
 
 * **⚙️ Fully Automated:** Runs in the background and requires no manual intervention after initial setup.
-* **🔌 Real-Time Trigger:** Detects when a `BED_MESH_CALIBRATE` command completes and immediately fetches the new probe and mesh data.
-* **⏰ Periodic Sync:** Includes a configurable fallback timer (e.g., every 6 hours) to sync data, ensuring no new information is missed.
-* **🧠 Smart Duplicate Handling:** Prevents duplicate entries by checking timestamps for probe points and the entire data matrix for bed meshes.
+* **🔌 Reliable Trigger-Based Sync:** Detects when a `BED_MESH_CALIBRATE` command completes and immediately triggers a full refresh of both probe and bed mesh data.
+* **🔄 Resilient Auto-Reconnect:** If the connection to the printer is lost (e.g., printer is turned off), the service will automatically try to reconnect at a configurable interval without crashing.
+* **⏰ Periodic Sync:** Includes a configurable fallback timer (e.g., every 6 hours) to sync data, ensuring no information is missed.
+* **🧠 Smart Duplicate Handling:** Prevents redundant entries by checking timestamps for probe points and the entire data matrix for bed meshes.
 * **💾 Persistent Storage:** Saves all collected data into clean, human-readable JSON files.
-* **🐳 Dockerized:** The entire application is containerized for easy, cross-platform deployment and dependency management.
-* **🔧 Configurable:** All parameters (host IP, file paths, sync interval) are managed via a simple `.env` file.
+* **🐳 Dockerized:** The entire application is containerized for easy, cross-platform deployment, dependency management, and timezone synchronization with the host.
+* **📝 Timestamped Logging:** All actions are logged to the Docker console with timestamps for easy monitoring and debugging.
+* **🔧 Configurable:** All parameters (host IP, file paths, sync intervals) are managed via a simple `.env` file.
 
 ***
 
@@ -44,7 +46,7 @@ Follow these steps to get the logger running.
 
 ### Step 1: Prepare Project Files
 
-Clone this repository or create the files as shown in the project structure above.
+Clone this repository or create the files as shown in the project structure above. The `poetry.lock` file is included, so you do not need to generate it.
 
 ### Step 2: Configure Environment Variables
 
@@ -64,6 +66,10 @@ MESH_DATA_FILE=data/bed_mesh_data.json
 # --- Sync Interval ---
 # The time in hours for the periodic background sync.
 SYNC_INTERVAL_HOURS=6
+
+# --- Connection Resilience ---
+# Delay in seconds before retrying to connect after a failure.
+RETRY_DELAY_SECONDS=300
 ```
 
 ***
