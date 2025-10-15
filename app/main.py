@@ -107,6 +107,25 @@ class MoonrakerClient:
             "mesh_min": bed_mesh.get("mesh_min"), "mesh_max": bed_mesh.get("mesh_max"),
             "probed_matrix": bed_mesh.get("probed_matrix")
         }
+    
+    async def get_z_offset_data(self) -> List[Dict]:
+        """Fetches the G-code history to extract all Z-Offset measurements."""
+        logging.info("Requesting G-code store for Z-Offset data...")
+        request_id = await self._send_request("server.gcode_store")
+        while True:
+            response = await self._receive_response()
+            if response.get("id") == request_id: break
+        
+        offset_data = []
+        pattern = re.compile(r"probe: z_offset: ([-\d\.]+)")
+        for item in response.get("result", {}).get("gcode_store", []):
+            # The message can have newlines, so we search instead of matching start
+            match = pattern.search(item.get("message", ""))
+            if match:
+                z_offset = float(match.group(1))
+                offset_data.append({"z_offset": z_offset, "timestamp": item.get("time")})
+        logging.info(f"📏 Found {len(offset_data)} Z-Offset entries in gcode_store.")
+        return offset_data
 
 # ==============================================================================
 # Helper Functions for Syncing Data
@@ -140,11 +159,28 @@ async def sync_mesh_data(client: MoonrakerClient, handler: DataHandler):
         handler.save_data(updated_meshes)
     else:
         logging.info("👍 Bed mesh is identical to the last saved version.")
+        
+async def sync_z_offset_data(client: MoonrakerClient, handler: DataHandler):
+    """Fetches G-code history and saves any new Z-Offset entries."""
+    fetched_offsets = await client.get_z_offset_data()
+    if not fetched_offsets: return
+
+    existing_data = handler.load_data()
+    existing_timestamps = {p['timestamp'] for p in existing_data}
+    offsets_to_add = [p for p in fetched_offsets if p['timestamp'] not in existing_timestamps]
+
+    if offsets_to_add:
+        logging.info(f"✨ Found {len(offsets_to_add)} new Z-Offset entries to add.")
+        all_offsets = existing_data + offsets_to_add
+        all_offsets.sort(key=lambda p: p.get('timestamp', 0))
+        handler.save_data(all_offsets)
+    else:
+        logging.info("👍 Z-Offset data file is already up-to-date.")
 
 # ==============================================================================
 # Concurrent Asynchronous Tasks
 # ==============================================================================
-async def listen_for_triggers_task(client: MoonrakerClient, probe_handler: DataHandler, mesh_handler: DataHandler):
+async def listen_for_triggers_task(client: MoonrakerClient, probe_handler: DataHandler, mesh_handler: DataHandler, z_offset_handler: DataHandler):
     """A long-running task that listens for the 'Mesh Bed Leveling Complete' trigger."""
     logging.info("📡 Listening for 'Mesh Bed Leveling Complete' trigger...")
     while True:
@@ -158,10 +194,11 @@ async def listen_for_triggers_task(client: MoonrakerClient, probe_handler: DataH
                 logging.info("--- Starting Full Data Refresh ---")
                 await sync_probe_data(client, probe_handler)
                 await sync_mesh_data(client, mesh_handler)
+                await sync_z_offset_data(client, z_offset_handler)
                 logging.info("--- Data Refresh Complete ---")
                 logging.info("📡 Resuming listening for trigger...")
 
-async def periodic_sync_task(client: MoonrakerClient, probe_handler: DataHandler, mesh_handler: DataHandler, interval_hours: float):
+async def periodic_sync_task(client: MoonrakerClient, probe_handler: DataHandler, mesh_handler: DataHandler, z_offset_handler: DataHandler, interval_hours: float):
     """A long-running task that periodically syncs data every N hours as a fallback."""
     interval_seconds = interval_hours * 3600
     while True:
@@ -172,6 +209,7 @@ async def periodic_sync_task(client: MoonrakerClient, probe_handler: DataHandler
         try:
             await sync_probe_data(client, probe_handler)
             await sync_mesh_data(client, mesh_handler)
+            await sync_z_offset_data(client, z_offset_handler)
             logging.info("--- Scheduled Refresh Complete ---")
         except Exception as e:
             logging.error(f"❌ Error during scheduled sync: {e}")
@@ -190,10 +228,11 @@ async def main():
     port = int(os.getenv("MOONRAKER_PORT", 7125))
     probe_file = os.getenv("PROBE_DATA_FILE")
     mesh_file = os.getenv("MESH_DATA_FILE")
+    z_offset_file = os.getenv("Z_OFFSET_DATA_FILE")
     sync_interval = float(os.getenv("SYNC_INTERVAL_HOURS", 6))
     retry_delay = int(os.getenv("RETRY_DELAY_SECONDS", 30))
 
-    if not all([host, probe_file, mesh_file]):
+    if not all([host, probe_file, mesh_file, z_offset_file]):
         logging.critical("❌ CRITICAL: One or more environment variables are not set. Please check your .env file.")
         return
 
@@ -203,6 +242,7 @@ async def main():
             # Initialize components for this connection attempt.
             probe_handler = DataHandler(filename=probe_file)
             mesh_handler = DataHandler(filename=mesh_file)
+            z_offset_handler = DataHandler(filename=z_offset_file)
             client = MoonrakerClient(host=host, port=port)
 
             # Establish connection and perform an initial data sync.
@@ -210,11 +250,12 @@ async def main():
             logging.info("--- Performing Initial Data Sync ---")
             await sync_probe_data(client, probe_handler)
             await sync_mesh_data(client, mesh_handler)
+            await sync_z_offset_data(client, z_offset_handler)
             logging.info("--- Initial Sync Complete ---")
 
             # Create and run the two main concurrent tasks.
-            listener_task = asyncio.create_task(listen_for_triggers_task(client, probe_handler, mesh_handler))
-            timer_task = asyncio.create_task(periodic_sync_task(client, probe_handler, mesh_handler, sync_interval))
+            listener_task = asyncio.create_task(listen_for_triggers_task(client, probe_handler, mesh_handler, z_offset_handler))
+            timer_task = asyncio.create_task(periodic_sync_task(client, probe_handler, mesh_handler, z_offset_handler, sync_interval))
             
             # This will run until one of the tasks raises an exception (e.g., connection loss).
             await asyncio.gather(listener_task, timer_task)

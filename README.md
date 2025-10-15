@@ -1,14 +1,14 @@
 # Klipper Bed Mesh & Probe Data Logger
 
-A simple, automated service to collect and store bed mesh and probe data from a Klipper 3D printer running Moonraker. This tool runs continuously in a Docker container, listening for events and periodically syncing data for long-term analysis and visualization.
+A simple, automated service to collect and store bed mesh, probe, and Z-Offset data from a Klipper 3D printer running Moonraker. This tool runs continuously in a Docker container, listening for events and periodically syncing data for long-term analysis and visualization.
 
 ## Features
 
 * **⚙️ Fully Automated:** Runs in the background and requires no manual intervention after initial setup.
-* **🔌 Reliable Trigger-Based Sync:** Detects when a `BED_MESH_CALIBRATE` command completes and immediately triggers a full refresh of both probe and bed mesh data.
+* **🔌 Reliable Trigger-Based Sync:** Detects when a `BED_MESH_CALIBRATE` command completes and immediately triggers a full refresh of probe, bed mesh, and Z-Offset data.
 * **🔄 Resilient Auto-Reconnect:** If the connection to the printer is lost (e.g., printer is turned off), the service will automatically try to reconnect at a configurable interval without crashing.
 * **⏰ Periodic Sync:** Includes a configurable fallback timer (e.g., every 6 hours) to sync data, ensuring no information is missed.
-* **🧠 Smart Duplicate Handling:** Prevents redundant entries by checking timestamps for probe points and the entire data matrix for bed meshes.
+* **🧠 Smart Duplicate Handling:** Prevents redundant entries by checking timestamps for probe points and Z-Offsets, and the entire data matrix for bed meshes.
 * **💾 Persistent Storage:** Saves all collected data into clean, human-readable JSON files.
 * **🐳 Dockerized:** The entire application is containerized for easy, cross-platform deployment, dependency management, and timezone synchronization with the host.
 * **📝 Timestamped Logging:** All actions are logged to the Docker console with timestamps for easy monitoring and debugging.
@@ -62,6 +62,7 @@ MOONRAKER_PORT=7125
 # --- Data File Paths (inside the container's /app/data volume) ---
 PROBE_DATA_FILE=data/probe_data.json
 MESH_DATA_FILE=data/bed_mesh_data.json
+Z_OFFSET_DATA_FILE=data/z_offset_data.json
 
 # --- Sync Interval ---
 # The time in hours for the periodic background sync.
@@ -107,7 +108,8 @@ docker-compose down
 
 ## Output
 
-The service will generate and continuously update two files inside the `data/` directory. This folder is **persistently mounted** to your host machine, so your collected data is safe even if the container is stopped or removed.
+The service will generate and continuously update three files inside the `data/` directory. This folder is **persistently mounted** to your host machine, so your collected data is safe.
 
-* **`probe_data.json`**: A list of all unique probe points collected, each with its `x`, `y`, `z` coordinates and the original `timestamp`.
-* **`bed_mesh_data.json`**: A list of all unique bed meshes, including the profile name, mesh boundaries, and the full `probed_matrix` of Z-values.
+* **`probe_data.json`**: A list of all unique probe points collected, each with its `x`, `y`, `z` coordinates and timestamp.
+* **`bed_mesh_data.json`**: A list of all unique bed meshes, including the profile name, mesh boundaries, and the full `probed_matrix`.
+* **`z_offset_data.json`**: A list of all unique Z-Offset measurements, each with the `z_offset` value and its timestamp.
